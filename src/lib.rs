@@ -5,7 +5,8 @@ use egui_probe::{EguiProbe, Style};
 use hashbrown::HashMap;
 
 /// Top-level descriptio of a value.
-#[derive(Clone, Debug, Default, EguiProbe)]
+#[derive(Clone, Debug, Default, PartialEq, EguiProbe)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Desc {
     /// A boolean value.
     #[default]
@@ -18,9 +19,7 @@ pub enum Desc {
     Float { min: Option<f64>, max: Option<f64> },
 
     /// A string value.
-    String {
-        variants: Option<Vec<String>>,
-    },
+    String { variants: Option<Vec<String>> },
 
     /// A list of values.
     List {
@@ -41,12 +40,10 @@ impl Desc {
             Desc::Bool => Value::Bool(false),
             Desc::Int { min, .. } => Value::Int(min.unwrap_or(0)),
             Desc::Float { min, .. } => Value::Float(min.unwrap_or(0.0)),
-            Desc::String { ref variants } => {
-                variants.as_ref().and_then(|v| v.first()).map_or_else(
-                    || Value::String(String::new()),
-                    |s| Value::String(s.clone()),   
-                )
-            }
+            Desc::String { ref variants } => variants.as_ref().and_then(|v| v.first()).map_or_else(
+                || Value::String(String::new()),
+                |s| Value::String(s.clone()),
+            ),
             Desc::List { .. } => Value::List(Vec::new()),
             Desc::Map { .. } => Value::Map(HashMap::new()),
         }
@@ -87,15 +84,6 @@ impl Value {
             Value::List(_) => "list",
             Value::Map(_) => "map",
         }
-    }
-
-    fn has_inner(&self) -> bool {
-        match self {
-            Value::List(elems) => !elems.is_empty(),
-            Value::Map(values) => !values.is_empty(),
-            _ => false,
-        }
-    
     }
 }
 
@@ -274,23 +262,22 @@ impl EguiProbe for ValueProbe<'_> {
                 }
             }
             Some(&Desc::String { ref variants }) => match self.value {
-                Value::String(value) => {
-                    match variants {
-                        None => value.probe(ui, style),
-                        Some(variants) => {
-                            let cbox = egui::ComboBox::from_id_source(self.id_source).selected_text(&**value);
-                            
-                            cbox.show_ui(ui, |ui| {
-                                for variant in variants.iter() {
-                                    if ui.selectable_label(value == variant, variant).clicked() {
-                                        *value = variant.clone();
-                                    }
-                                }
-                            }).response
-                        }
-                    }
+                Value::String(value) => match variants {
+                    None => value.probe(ui, style),
+                    Some(variants) => {
+                        let cbox =
+                            egui::ComboBox::from_id_salt(self.id_source).selected_text(&**value);
 
-                }
+                        cbox.show_ui(ui, |ui| {
+                            for variant in variants.iter() {
+                                if ui.selectable_label(value == variant, variant).clicked() {
+                                    *value = variant.clone();
+                                }
+                            }
+                        })
+                        .response
+                    }
+                },
                 Value::Bool(value) if variants.is_none() => {
                     let (r, s) = convert_to_string(ui, value, "bool");
                     if let Some(s) = s {
@@ -312,7 +299,7 @@ impl EguiProbe for ValueProbe<'_> {
                     }
                     r
                 }
-                _  if variants.is_none() => {
+                _ if variants.is_none() => {
                     ui.horizontal(|ui| {
                         ui.strong(format!(
                             "Expected string, but is {} instead",
@@ -325,54 +312,64 @@ impl EguiProbe for ValueProbe<'_> {
                     })
                     .response
                 }
-                _  => {
+                _ => {
                     ui.horizontal(|ui| {
                         ui.strong(format!(
                             "Expected string, but is {} instead",
                             self.value.kind()
                         ));
                         if ui.small_button("Reset to default value").clicked() {
-                            *self.value = Value::String( variants.as_ref().unwrap().first().map_or(String::new(), |s| s.clone()) );
+                            *self.value = Value::String(
+                                variants
+                                    .as_ref()
+                                    .unwrap()
+                                    .first()
+                                    .map_or(String::new(), |s| s.clone()),
+                            );
                         }
                         ui.strong("?");
                     })
                     .response
                 }
             },
-            Some(&Desc::List { elem_desc: ref elem }) => match self.value {
-                Value::List(elems) => {
-                    match elem {
-                        None => {
-                            self.myid = ui.make_persistent_id(self.id_source.with("List"));
-                            self.mydesc = ui
-                                .ctx()
-                                .data(|d| d.get_temp::<Desc>(self.myid))
-                                .unwrap_or_default();
-        
-                            let r = ui.horizontal(|ui| {
+            Some(&Desc::List {
+                elem_desc: ref elem,
+            }) => match self.value {
+                Value::List(elems) => match elem {
+                    None => {
+                        self.myid = ui.make_persistent_id(self.id_source.with("List"));
+                        self.mydesc = ui
+                            .ctx()
+                            .data(|d| d.get_temp::<Desc>(self.myid))
+                            .unwrap_or_default();
+
+                        let r = ui
+                            .horizontal(|ui| {
                                 self.mydesc.probe(ui, style);
 
                                 let r = ui.small_button(style.add_button_text());
                                 if r.clicked() {
                                     elems.push(self.mydesc.default_value());
                                 }
-                            }).response;
+                            })
+                            .response;
 
-                            ui.ctx().data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
-                            r
-                        }
-                        Some(elem) => {
-                            ui.horizontal(|ui| {
-                                ui.weak(elem.kind());
-
-                                let r = ui.small_button(style.add_button_text());
-                                if r.clicked() {
-                                    elems.push(elem.default_value());
-                                }
-                            }).response
-                        }
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
+                        r
                     }
-                }
+                    Some(elem) => {
+                        ui.horizontal(|ui| {
+                            ui.weak(elem.kind());
+
+                            let r = ui.small_button(style.add_button_text());
+                            if r.clicked() {
+                                elems.push(elem.default_value());
+                            }
+                        })
+                        .response
+                    }
+                },
                 _ => {
                     ui.horizontal(|ui| {
                         ui.strong(format!(
@@ -387,14 +384,19 @@ impl EguiProbe for ValueProbe<'_> {
                     .response
                 }
             },
-            Some(&Desc::Map { value_desc: ref value }) => match self.value {
+            Some(&Desc::Map {
+                value_desc: ref value,
+            }) => match self.value {
                 Value::Map(values) => {
                     #[derive(Clone)]
                     struct NewKey(String);
-                    
+
                     self.myid = ui.make_persistent_id(self.id_source.with("Map"));
 
-                    let mut new_key = ui.ctx().data(|d| d.get_temp::<NewKey>(self.myid)).unwrap_or(NewKey(String::new()));
+                    let mut new_key = ui
+                        .ctx()
+                        .data(|d| d.get_temp::<NewKey>(self.myid))
+                        .unwrap_or(NewKey(String::new()));
 
                     let r = match value {
                         None => {
@@ -403,18 +405,24 @@ impl EguiProbe for ValueProbe<'_> {
                                 .data(|d| d.get_temp::<Desc>(self.myid))
                                 .unwrap_or_default();
 
-                            let r = ui.horizontal(|ui| {
-                                self.mydesc.probe(ui, style);
+                            let r = ui
+                                .horizontal(|ui| {
+                                    self.mydesc.probe(ui, style);
 
-                                ui.text_edit_singleline(&mut new_key.0);
+                                    ui.text_edit_singleline(&mut new_key.0);
 
-                                let r = ui.small_button(style.add_button_text());
-                                if r.clicked() {
-                                    values.insert(std::mem::take(&mut new_key.0), self.mydesc.default_value());
-                                }
-                            }).response;
+                                    let r = ui.small_button(style.add_button_text());
+                                    if r.clicked() {
+                                        values.insert(
+                                            std::mem::take(&mut new_key.0),
+                                            self.mydesc.default_value(),
+                                        );
+                                    }
+                                })
+                                .response;
 
-                            ui.ctx().data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
+                            ui.ctx()
+                                .data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
                             r
                         }
                         Some(elem) => {
@@ -425,9 +433,13 @@ impl EguiProbe for ValueProbe<'_> {
 
                                 let r = ui.small_button(style.add_button_text());
                                 if r.clicked() {
-                                    values.insert(std::mem::take(&mut new_key.0), elem.default_value());
+                                    values.insert(
+                                        std::mem::take(&mut new_key.0),
+                                        elem.default_value(),
+                                    );
                                 }
-                            }).response
+                            })
+                            .response
                         }
                     };
 
@@ -451,19 +463,6 @@ impl EguiProbe for ValueProbe<'_> {
         }
     }
 
-    fn has_inner(&mut self) -> bool {
-        match self.desc {
-            None => true,
-            Some(Desc::Bool) => false,
-            Some(Desc::Int { .. }) => false,
-            Some(Desc::Float { .. }) => false,
-            Some(Desc::String { .. }) => false,
-            Some(Desc::List { elem_desc }) => elem_desc.is_none() || self.value.has_inner(),
-            Some(Desc::Map { value_desc }) => value_desc.is_none() || self.value.has_inner(),
-
-        }
-    }
-
     fn iterate_inner(&mut self, ui: &mut Ui, f: &mut dyn FnMut(&str, &mut Ui, &mut dyn EguiProbe)) {
         match self.desc {
             None => {
@@ -477,13 +476,12 @@ impl EguiProbe for ValueProbe<'_> {
             Some(Desc::List { elem_desc: elem }) => {
                 let elem = match elem {
                     None => {
-                        if self.mydesc.has_inner() {
-                            self.mydesc.iterate_inner(ui, f);
-                        }
-                        ui.ctx().data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
+                        self.mydesc.iterate_inner(ui, f);
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
 
                         &self.mydesc
-                    },
+                    }
                     Some(elem) => &**elem,
                 };
 
@@ -509,13 +507,12 @@ impl EguiProbe for ValueProbe<'_> {
             Some(Desc::Map { value_desc: value }) => {
                 let desc = match value {
                     None => {
-                        if self.mydesc.has_inner() {
-                            self.mydesc.iterate_inner(ui, f);
-                        }
-                        ui.ctx().data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
+                        self.mydesc.iterate_inner(ui, f);
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(self.myid, self.mydesc.clone()));
 
                         &self.mydesc
-                    },
+                    }
                     Some(value) => &**value,
                 };
 
@@ -591,11 +588,9 @@ where
         .response
     }
 
-    fn has_inner(&mut self) -> bool {
-        self.value.has_inner() && !self.delete
-    }
-
     fn iterate_inner(&mut self, ui: &mut Ui, f: &mut dyn FnMut(&str, &mut Ui, &mut dyn EguiProbe)) {
-        self.value.iterate_inner(ui, f);
+        if !self.delete {
+            self.value.iterate_inner(ui, f);
+        }
     }
 }

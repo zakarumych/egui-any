@@ -3,16 +3,16 @@ name = "egui-any"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Dynamic schema and value ediable with egui"
+description = "Dynamic schema and value editable with egui"
 
 [features]
 serde = ["dep:serde"]
 
 [dependencies]
-egui = "0.27"
-egui-probe = { version = "0.3.6", features = ["derive"] }
-hashbrown = "0.13"
+egui = "0.31"
+egui-probe = { version = "0.8", features = ["derive"] }
+hashbrown = "0.15"
 serde = { version = "1.0", optional = true }
 
 [dev-dependencies]
-eframe = "0.27"
+eframe = "0.31"

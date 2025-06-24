@@ -1,12 +1,12 @@
-use egui_probe::Probe;
 use egui_any::{Desc, Value, ValueProbe};
+use egui_probe::Probe;
 
 fn main() {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "egui-any demo app",
         native_options,
-        Box::new(|cc| Box::new(EguiValueDemoApp::new(cc))),
+        Box::new(|cc| Ok(Box::new(EguiValueDemoApp::new(cc)))),
     )
     .unwrap();
 }
@@ -28,17 +28,18 @@ impl EguiValueDemoApp {
 impl eframe::App for EguiValueDemoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
-            egui::widgets::global_dark_light_mode_switch(ui);
+            egui::widgets::global_theme_preference_switch(ui);
         });
 
         egui::SidePanel::left("desc").show(ctx, |ui| {
-            Probe::new("Desc", &mut self.desc).show(ui);
+            Probe::new(&mut self.desc).with_header("Desc").show(ui);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui|{
-                let mut value_probe = ValueProbe::new(self.desc.as_ref(), &mut self.value, "demo-value");
-                Probe::new("Value", &mut value_probe).show(ui);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut value_probe =
+                    ValueProbe::new(self.desc.as_ref(), &mut self.value, "demo-value");
+                Probe::new(&mut value_probe).with_header("Value").show(ui);
             });
         });
     }
